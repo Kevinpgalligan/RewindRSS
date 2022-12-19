@@ -1,30 +1,4 @@
-;; Dependencies: hunchentoot, cl-who, drakma, lquery
-
-;; References:
-;; https://edicl.github.io/cl-who/#with-html-output-to-string
-;; https://edicl.github.io/hunchentoot/#port80
-;; And to start up the server from the REPL...
-;;   (hunchentoot:start (make-instance 'hunchentoot:easy-acceptor :port 4242))
-
-;; TODO:
-;; * Finish example interface for XKCD.
-;; * Create code to tie it all together:
-;;    - On start-up, load files in config directory. Allows user to define new feeds. And configure
-;;      the port. And URL?
-;;    - Don't cache the feed itself, as that can change depending on user config.
-;;    - Well, maybe cache it just to compare the output, then if it has changed u can go back
-;;      and increase the ID of the feed so that feed readers reload it?
-;;    - On receiving a request: load cached index / info (if it exists... if
-;;      not, load from scratch); if a new post is due, parse it & cache it; return the feed.
-;;    - Need a way to configure each of the feeds (active/inactive, which days of week, weekly or fortnightly or what have you).
-;;    - Can it be made platform independent somehow?
-;; * Can we somehow link the config for each feed & the code that's used to parse it?
-;; * Allow configuring an icon.
-;; * Error handling.
-;; * Allow caching of resources, e.g. could save XKCD image and inject a link to local server's copy of resource.
-;; * Force rate limiting to each site so that we don't spam.
-;; * Customise HTTP request, should maybe indicate that it's us.
-
+;;;; SECTION: dummy data.
 (defparameter *somedate* "Wed, 02 Oct 2002 08:00:00 EST")
 
 (defparameter *posts*
@@ -76,11 +50,27 @@
   `(defmethod scrape-content ((source ,source) ,identifier-var)
      ,@body))
 
+(defclass feed-item ()
+  ((title
+    :initarg :title
+    :reader title)
+   (content
+    :initarg :content
+    :reader content)))
+
+(defun make-feed-item (&key title content)
+  (make-instance 'feed-item :title title :content content))
+
 ;;;; SECTION: XKCD example.
 (defparameter *xkcd-link* "https://xkcd.com")
+
+(defun fetch-and-parse (link)
+  (lquery:$ (initialize (drakma:http-request link))))
+
 (def-feed-source xkcd)
+
 (def-scrape-index-fun (xkcd)
-  (let ((root (lquery:$ (initialize (drakma:http-request *xkcd-link*)))))
+  (let ((root (fetch-and-parse *xkcd-link*)))
     (loop for link across (lquery:$ root "a" (attr :href))
           for num-posts = (multiple-value-bind (full-match substrings)
                               (cl-ppcre:scan-to-strings (format nil "~a/(\\d+)" *xkcd-link*) link)
@@ -90,6 +80,14 @@
           when num-posts
             return (loop for k from 1 upto (parse-integer num-posts)
                          collect (format nil "~a/~a/" *xkcd-link* k)))))
-(def-scrape-content-fun (xkcd id)
-  ;; TODO implement function to scrape the content for a particular link
-  )
+
+(def-scrape-content-fun (xkcd link)
+    (let ((root (fetch-and-parse link)))
+      (make-feed-item :title (xkcd-get-title root)
+                      :content (xkcd-get-content root))))
+
+(defun xkcd-get-title (root)
+  (aref (lquery:$ root "div #ctitle" (text)) 0))
+
+(defun xkcd-get-content (root)
+  (aref (lquery:$ root "div #comic" (serialize)) 0))
