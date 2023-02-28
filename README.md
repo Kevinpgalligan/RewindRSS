@@ -6,6 +6,7 @@ Create custom RSS feeds and run them as a local server. Customisable via Common 
 * cl-who
 * drakma
 * lquery
+* alexandria
 
 ### Usage
 So far, just running it through the REPL:
@@ -15,8 +16,6 @@ So far, just running it through the REPL:
 ```
 
 ### TODO
-* Make interface less web-specific, feeds don't necessarily have to be from the internet.
-* Add other slots required for feed items (link, publication date -- not sure about guid), note that 'description' is the actual content.
 * Create code to tie it all together:
    - On start-up, load files in config directory. Allows user to define new feeds. And configure
      the port. And URL?
@@ -30,9 +29,15 @@ So far, just running it through the REPL:
 * Can we somehow link the config for each feed & the code that's used to parse it?
 * Allow configuring an icon.
 * Error handling.
-* Allow caching of resources, e.g. could save XKCD image and inject a link to local server's copy of resource.
 * Force rate limiting to each site so that we don't spam.
 * Customise HTTP request, should maybe indicate that it's us.
 
 ### References
 https://stackoverflow.com/questions/123793/design-question-how-would-you-design-a-recurring-event-system
+
+### Design
+Main loop:
+* Load config (schedule, start date, how many items to keep)
+* If no index, create it.
+* Load in the index.
+* Load any posts that are due.
