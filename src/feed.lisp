@@ -1,39 +1,3 @@
-;;;; SECTION: configuration
-(defvar *port* 4542)
-(defvar *save-dir* (uiop:native-namestring "~/.rewindrss.d/"))
-
-(defun get-link-to-server ()
-  (format nil "http://127.0.0.1:~a" *port*))
-
-;;;; SECTION: web server's XML generation.
-(hunchentoot:define-easy-handler (feed :uri "/feed.xml") (id-as-string)
-  (setf (hunchentoot:content-type*) "application/rss+xml")
-  (with-output-to-string (out)
-    (write-string "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>" out)
-    ;; Would prefer to include the rss tag in cl-who bit, but
-    ;; the colon in xmlns:atom makes it go crazy.
-    (write-string "<rss version=\"2.0\" xmlns:atom=\"http://www.w3.org/2005/Atom\">" out)
-    ;; TODO: error if feed does not exist, error if there's a failure
-    ;;       to fetch feed items? (Maybe both happen in `load-feed`).
-    (let* ((feed (load-feed (intern (string-upcase id-as-string)))))
-      (cl-who:with-html-output (out)
-        (:channel
-         (:title (cl-who:str (name feed)))
-         (:link (cl-who:str (format nil "~a/feed.xml?id=~a" (get-link-to-server) id-as-string)))
-         (:description (cl-who:str (description feed)))
-         (:|pubDate| (cl-who:str (pub-date feed)))
-         (:|lastBuildDate| (cl-who:str (last-build-date feed)))
-         (loop for item in (items feed)
-               do (cl-who:htm
-                   (:item
-                    (:title (cl-who:str (title item)))
-                    (:description (cl-who:str (description item)))
-                    (:link (cl-who:str (link item)))
-                    (:|pubDate| (cl-who:str (publication-date item)))
-                    (:guid (cl-who:str (guid item)))))))))
-    (write-string "</rss>" out)))
-
-;;;; SECTION: interface for feeds, their items & defining them.
 (defclass feed ()
   ((id
     :initarg :id
@@ -54,17 +18,17 @@
     :initarg :last-build-date
     :reader last-build-date)))
 
+
 (defun make-feed (&key id name items description publication-date last-build-date)
   "Creates a feed, the only required arguments are ID and NAME.
 ID is a unique identifier for the feed, NAME is its display name.
-All arguments are strings except ID, which should be a symbol, and ITEMS, which should
-be a list of FEED-ITEM objects.
-If DESCRIPTION is not provided, NAME will be used as the description."
+All arguments are strings except ID, which should be a symbol, and
+ITEMS, which should be a list of FEED-ITEM objects."
   (assert (and id name))
   (make-instance 'feed :id id
                        :name name
                        :items items
-                       :description (or description name)
+                       :description (or description "")
                        :publication-date publication-date
                        :last-build-date last-build date))
 
@@ -77,13 +41,14 @@ If DESCRIPTION is not provided, NAME will be used as the description."
                :description (config-get config :description)
                :publication-date (get-oldest-item items))))
 
+(defvar *save-dir* (uiop:native-namestring "~/.rewindrss.d/"))
+
 (defun load-feed-config (id)
   (let* ((id-as-string (id->string id))
          (path (format nil "~a~a/~a.conf" *save-dir* id-as-string id-as-string)))
     (if (not (uiop:file-exists-p path))
         (error (format nil "Config file ~a does not exist." path))
         (loop for ))))
-
 
 (defun id->string (id)
   (string-downcase (symbol-name id)))
@@ -99,6 +64,20 @@ If DESCRIPTION is not provided, NAME will be used as the description."
 (defun get-oldest-item (items)
   ;; TODO
   )
+
+(defun fetch-and-parse (link)
+  (lquery:$ (initialize (drakma:http-request link))))
+
+;;;;;; BETTER INTERFACE
+(defparameter *xkcd-link* "https://xkcd.com")
+
+(def-feed xkcd
+    (:load-index
+     (let ((root (fetch-and-parse *xkcd-link*)))
+       (loop for link across (lquery:$ root "a" (attr :href)))))
+  (:load-item or maybe :load-content (link)
+              ;; do stuff here
+              ))
 
 (defparameter *feed-functions* (make-hash-table))
 
@@ -161,36 +140,3 @@ distinguished from each other"
 (defun get-current-time ()
   ;; TODO
   )
-
-;;;; SECTION: XKCD example.
-(defparameter *xkcd-link* "https://xkcd.com")
-
-(defun fetch-and-parse (link)
-  (lquery:$ (initialize (drakma:http-request link))))
-
-
-(def-load-index-fun (xkcd)
-  (let ((root (fetch-and-parse *xkcd-link*)))
-    (loop for link across (lquery:$ root "a" (attr :href))
-          for num-posts = (multiple-value-bind (full-match substrings)
-                              (cl-ppcre:scan-to-strings (format nil "~a/(\\d+)" *xkcd-link*) link)
-                            (declare (ignore full-match))
-                            (when substrings
-                              (aref substrings 0)))
-          when num-posts
-            return (loop for k from 1 upto (parse-integer num-posts)
-                         collect (format nil "~a/~a/" *xkcd-link* k)))))
-
-(def-load-content-fun (xkcd link)
-    (let ((root (fetch-and-parse link)))
-      (make-feed-item :title (xkcd-get-title root)
-                      :content (xkcd-get-content root)
-                      :link link
-                      :publication-date (serialise-time-rfc822 (get-current-time))
-                      :guid link)))
-
-(defun xkcd-get-title (root)
-  (aref (lquery:$ root "div #ctitle" (text)) 0))
-
-(defun xkcd-get-content (root)
-  (aref (lquery:$ root "div #comic" (serialize)) 0))
